@@ -21,7 +21,7 @@ signatory = { git = "https://github.com/cakioe/signatory.git" }
 ## Usage
 
 ```rust
-use signatory::Signatory;
+use signatory_kit::Signatory;
 use serde_json::Value;
 use std::collections::HashMap;
 
