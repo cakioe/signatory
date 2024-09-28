@@ -1,11 +1,11 @@
 [package]
-name = "signatory"
+name = "signatory_kit"
 version = "1.0.0"
-description = "Rust Signatory"
+description = "Rust Signatory Kit"
 authors = ["cleveng <cleveng@gmail.com>"]
 license = "MIT"
 edition = "2021"
-repository = "git@github.com:cakioe/signatory.git"
+repository = "https://github.com/cakioe/signatory.git"
 rust-version = "1.60.0"
 keywords = ["signature", "base64", "md5", "timestamp", "serde"]
 
