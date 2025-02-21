@@ -1,10 +1,10 @@
+use base64::engine::general_purpose; // Using the general-purpose base64 encoding engine
+use base64::Engine;
+use chrono::Utc;
+use md5;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error;
-use base64::Engine;
-use serde_json::Value;
-use base64::engine::general_purpose; // Using the general-purpose base64 encoding engine
-use md5;
-use chrono::Utc;
 
 /// Struct responsible for signing operations.
 pub struct Signatory {
@@ -38,7 +38,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns the generated signature as a `Result<String, Box<dyn Error>>`.
-    pub fn gen_signature(
+    pub fn generate_sign(
         &self,
         mut params: HashMap<String, Value>,
     ) -> Result<String, Box<dyn Error>> {
@@ -92,10 +92,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns the Base64 encoded string as `Result<String, Box<dyn Error>>`.
-    pub fn to_base64_str(
-        &self,
-        mut params: HashMap<String, Value>,
-    ) -> Result<String, Box<dyn Error>> {
+    pub fn to_string(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
         // Check if `params` is empty
         if params.is_empty() {
             return Err("Params is empty".into());
@@ -109,7 +106,7 @@ impl Signatory {
 
         // Insert signature if it doesn't exist
         if !params.contains_key("sign") {
-            let sign = self.gen_signature(params.clone()).unwrap(); // Generate signature
+            let sign = self.generate_sign(params.clone()).unwrap(); // Generate signature
             params.insert("sign".to_string(), Value::String(sign));
         }
 
@@ -137,10 +134,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns the decoded `HashMap<String, Value>` as `Result<HashMap<String, Value>, Box<dyn Error>>`.
-    pub fn decrypt_base64_str(
-        &self,
-        params: String,
-    ) -> Result<HashMap<String, Value>, Box<dyn Error>> {
+    pub fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>> {
         // Base64 decode the input string
         let bytes = general_purpose::STANDARD.decode(&params).unwrap();
 
@@ -166,8 +160,8 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns `true` if the signature matches, otherwise `false`.
-    pub fn check_signature(&self, params: HashMap<String, Value>, sign: String) -> bool {
-        let value = self.gen_signature(params);
+    pub fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool {
+        let value = self.generate_sign(params);
         if value.is_err() {
             return false;
         }
@@ -190,33 +184,48 @@ mod tests {
 
         // Prepare a sample HashMap
         let mut params = HashMap::new();
-        params.insert("client_id".to_string(), Value::String("16327128".to_string()));
-        params.insert("method".to_string(), Value::String("android.shutdown".to_string()));
-        params.insert("timestamp".to_string(), Value::String("1727494645".to_string()));
+        params.insert(
+            "client_id".to_string(),
+            Value::String("16327128".to_string()),
+        );
+        params.insert(
+            "method".to_string(),
+            Value::String("android.shutdown".to_string()),
+        );
+        params.insert(
+            "timestamp".to_string(),
+            Value::String("1727494645".to_string()),
+        );
 
         // Generate signature
-        let sign = signatory.gen_signature(params.clone()).unwrap();
+        let sign = signatory.generate_sign(params.clone()).unwrap();
         println!("Generated sign: {}", sign);
 
         // Manually provided expected signature (from the decoded JSON)
         let expected_sign = "4D49FFFDE0DA4537160CFC258356277B";
 
         // Assert that the generated signature matches the expected one
-        assert_eq!(sign, expected_sign, "The generated signature should match the expected signature");
+        assert_eq!(
+            sign, expected_sign,
+            "The generated signature should match the expected signature"
+        );
 
         // Insert the expected sign back into the params
         params.insert("sign".to_string(), Value::String(sign.clone()));
 
         // Now encode the parameters as base64
-        let base64_str = signatory.to_base64_str(params.clone()).unwrap();
+        let base64_str = signatory.to_string(params.clone()).unwrap();
         println!("Base64 encoded: {}", base64_str);
 
         // Decode back to HashMap
-        let decoded_params = signatory.decrypt_base64_str(base64_str).unwrap();
-        assert_eq!(params, decoded_params, "Decoded params should match the original params");
+        let decoded_params = signatory.decrypt(base64_str).unwrap();
+        assert_eq!(
+            params, decoded_params,
+            "Decoded params should match the original params"
+        );
 
         // Check if signature is valid
-        let is_valid = signatory.check_signature(decoded_params.clone(), sign.clone());
+        let is_valid = signatory.check_sign(decoded_params.clone(), sign.clone());
         assert!(is_valid, "Signature should be valid");
     }
 }

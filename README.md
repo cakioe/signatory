@@ -15,13 +15,13 @@ Add `Signatory` to your `Cargo.toml` dependencies:
 
 ```toml
 [dependencies]
-signatory = { git = "https://github.com/cakioe/signatory.git" }
+async-signatory = { git = "https://github.com/cakioe/signatory.git" }
 ```
 
 ## Usage
 
 ```rust
-use signatory_kit::Signatory;
+use async_signatory::Signatory;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -35,19 +35,19 @@ let signatory = Signatory::new(key);
     params.insert("timestamp".to_string(), Value::String("1727494645".to_string()));
 
     // Generate a signature
-    let sign = signatory.gen_signature(params.clone()).unwrap();
+    let sign = signatory.generate_sign(params.clone()).unwrap();
     println!("Generated signature: {}", sign);
 
     // Add signature to the params and encode to Base64
-    let base64_str = signatory.to_base64_str(params.clone()).unwrap();
+    let base64_str = signatory.to_string(params.clone()).unwrap();
     println!("Base64 Encoded: {}", base64_str);
 
     // Decode the Base64 string back to HashMap
-    let decoded_params = signatory.decrypt_base64_str(base64_str).unwrap();
+    let decoded_params = signatory.decrypt(base64_str).unwrap();
     println!("Decoded params: {:?}", decoded_params);
 
     // Validate the signature
-    let is_valid = signatory.check_signature(decoded_params.clone(), sign.clone());
+    let is_valid = signatory.check_sign(decoded_params.clone(), sign.clone());
     assert!(is_valid, "Signature is valid");
 }
 
