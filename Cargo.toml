@@ -1,20 +1,20 @@
 [package]
 name = "async-signatory"
-version = "1.1.1"
+version = "1.1.2"
 description = "Rust Signatory Kit"
 authors = ["cleveng <cleveng@gmail.com>"]
 license = "MIT"
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/cakioe/signatory.git"
-rust-version = "1.60.0"
+rust-version = "1.85.0"
 keywords = ["signature", "base64", "md5", "timestamp", "serde"]
 
 [dependencies]
-serde = { version = "1.0.218", features = ["derive"] }
-serde_json = "1.0.139"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
 base64 = "0.22.1"
 md5 = "0.7.0"
-chrono = "0.4.39"
+chrono = "0.4.40"
 
 [features]
 default = []

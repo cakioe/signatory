@@ -1,5 +1,5 @@
-use base64::engine::general_purpose; // Using the general-purpose base64 encoding engine
 use base64::Engine;
+use base64::engine::general_purpose; // Using the general-purpose base64 encoding engine
 use chrono::Utc;
 use md5;
 use serde_json::Value;
@@ -11,13 +11,21 @@ pub struct Signatory {
     key: String, // Secret key used for generating signatures
 }
 
-impl Signatory {
+pub trait Signer {
+    fn new(key: String) -> Signatory;
+    fn generate_sign(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
+    fn to_string(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
+    fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>>;
+    fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool;
+}
+
+impl Signer for Signatory {
     /// Creates a new instance of the Signatory struct with the provided secret key.
     ///
     /// # Arguments
     ///
     /// * `key` - A `String` representing the secret key to be used in signing.
-    pub fn new(key: String) -> Signatory {
+    fn new(key: String) -> Signatory {
         Signatory { key }
     }
 
@@ -38,10 +46,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns the generated signature as a `Result<String, Box<dyn Error>>`.
-    pub fn generate_sign(
-        &self,
-        mut params: HashMap<String, Value>,
-    ) -> Result<String, Box<dyn Error>> {
+    fn generate_sign(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
         // Ensure `params` is not empty
         if params.is_empty() {
             return Err("Params is empty".into());
@@ -92,7 +97,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns the Base64 encoded string as `Result<String, Box<dyn Error>>`.
-    pub fn to_string(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
+    fn to_string(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
         // Check if `params` is empty
         if params.is_empty() {
             return Err("Params is empty".into());
@@ -134,7 +139,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns the decoded `HashMap<String, Value>` as `Result<HashMap<String, Value>, Box<dyn Error>>`.
-    pub fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>> {
+    fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>> {
         // Base64 decode the input string
         let bytes = general_purpose::STANDARD.decode(&params).unwrap();
 
@@ -160,7 +165,7 @@ impl Signatory {
     /// # Returns
     ///
     /// Returns `true` if the signature matches, otherwise `false`.
-    pub fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool {
+    fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool {
         let value = self.generate_sign(params);
         if value.is_err() {
             return false;
