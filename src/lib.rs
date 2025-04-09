@@ -111,7 +111,7 @@ impl Signer for Signatory {
 
         // Insert signature if it doesn't exist
         if !params.contains_key("sign") {
-            let sign = self.generate_sign(params.clone()).unwrap(); // Generate signature
+            let sign = self.generate_sign(params.clone())?; // Generate signature
             params.insert("sign".to_string(), Value::String(sign));
         }
 
@@ -141,13 +141,13 @@ impl Signer for Signatory {
     /// Returns the decoded `HashMap<String, Value>` as `Result<HashMap<String, Value>, Box<dyn Error>>`.
     fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>> {
         // Base64 decode the input string
-        let bytes = general_purpose::STANDARD.decode(&params).unwrap();
+        let bytes = general_purpose::STANDARD.decode(&params)?;
 
         // Convert the decoded bytes into a UTF-8 string
-        let body = String::from_utf8(bytes).unwrap();
+        let body = String::from_utf8(bytes)?;
 
         // Deserialize the string into a HashMap
-        let result = serde_json::from_str(&body).unwrap();
+        let result = serde_json::from_str(&body)?;
         Ok(result)
     }
 
@@ -166,12 +166,13 @@ impl Signer for Signatory {
     ///
     /// Returns `true` if the signature matches, otherwise `false`.
     fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool {
-        let value = self.generate_sign(params);
-        if value.is_err() {
-            return false;
+        match self.generate_sign(params) {
+            Err(e) => {
+                println!("Error generating signature: {}", e);
+                return false;
+            }
+            Ok(generated_sign) => sign == generated_sign,
         }
-
-        value.unwrap() == sign
     }
 }
 
