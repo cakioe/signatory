@@ -15,6 +15,7 @@ pub trait Signer {
     fn new(key: String) -> Signatory;
     fn generate_sign(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
     fn to_string(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
+    fn to_json(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
     fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>>;
     fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool;
 }
@@ -97,7 +98,34 @@ impl Signer for Signatory {
     /// # Returns
     ///
     /// Returns the Base64 encoded string as `Result<String, Box<dyn Error>>`.
-    fn to_string(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
+    fn to_string(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
+        let body = match self.to_json(params) {
+            Ok(json) => json,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        // Encode the JSON string to Base64
+        let encoded = general_purpose::STANDARD.encode(body);
+
+        Ok(encoded)
+    }
+
+    /// Converts a `HashMap<String, Value>` into a JSON string with the following steps:
+    /// 1. Checks if the input `params` is empty, returning an error if it is.
+    /// 2. Inserts the current timestamp as a string if the "timestamp" key is missing.
+    /// 3. Generates a signature and adds it to the `params` if the "sign" key is missing.
+    /// 4. Serializes the `HashMap` to a JSON string.
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - A mutable `HashMap<String, Value>` containing the parameters to encode.
+    ///
+    /// # Returns
+    ///
+    /// Returns the JSON string as `Result<String, Box<dyn Error>>`.
+    fn to_json(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
         // Check if `params` is empty
         if params.is_empty() {
             return Err("Params is empty".into());
@@ -119,10 +147,7 @@ impl Signer for Signatory {
         let body = serde_json::to_string(&params)
             .map_err(|e| format!("Failed to serialize params to JSON: {}", e))?;
 
-        // Encode the JSON string to Base64
-        let encoded = general_purpose::STANDARD.encode(body);
-
-        Ok(encoded)
+        Ok(body)
     }
 
     /// Decodes a Base64-encoded string into a `HashMap<String, Value>`.
