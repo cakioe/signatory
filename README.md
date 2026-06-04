@@ -50,5 +50,4 @@ let signatory = Signatory::new(key);
     let is_valid = signatory.check_sign(decoded_params.clone(), sign.clone());
     assert!(is_valid, "Signature is valid");
 }
-
 ```
