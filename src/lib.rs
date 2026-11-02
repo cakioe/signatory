@@ -1,104 +1,73 @@
+use anyhow::anyhow;
 use base64::Engine;
-use base64::engine::general_purpose; // Using the general-purpose base64 encoding engine
-use chrono::Utc;
+use base64::engine::general_purpose;
 use md5;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::error::Error;
 
-/// Struct responsible for signing operations.
-pub struct Signatory {
-    key: String, // Secret key used for generating signatures
-}
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
 
-pub trait Signer {
-    fn new(key: String) -> Signatory;
-    fn generate_sign(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
-    fn to_string(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
-    fn to_json(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>>;
-    fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>>;
+#[cfg_attr(feature = "wasm", wasm_bindgen)]
+pub struct Signatory(String);
+
+pub trait SignerTrait {
+    fn new(secret: impl Into<String>) -> Self
+    where
+        Self: Sized;
+
+    fn current_timestamp() -> i64;
+
+    fn to_string(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error>;
+    fn to_json(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error>;
+    fn decrypt(&self, params: impl Into<String>) -> Result<HashMap<String, Value>, anyhow::Error>;
+
+    #[deprecated(since = "1.2.0", note = "please use `sign` instead")]
+    fn generate_sign(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error>;
+    fn sign(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error>;
+
+    #[deprecated(since = "1.2.0", note = "please use `verify` instead")]
     fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool;
+    fn verify(&self, params: HashMap<String, Value>, sign: impl Into<String>) -> bool;
 }
 
-impl Signer for Signatory {
-    /// Creates a new instance of the Signatory struct with the provided secret key.
-    ///
-    /// # Arguments
-    ///
-    /// * `key` - A `String` representing the secret key to be used in signing.
-    fn new(key: String) -> Signatory {
-        Signatory { key }
+impl SignerTrait for Signatory {
+    fn new(secret: impl Into<String>) -> Self {
+        Self(secret.into())
     }
 
-    /// Generates a signature from a given `HashMap<String, Value>`.
-    ///
-    /// Steps:
-    /// 1. Removes the `sign` field from `params` if it exists.
-    /// 2. Sorts the remaining keys in ascending order.
-    /// 3. Builds a query string from key-value pairs.
-    /// 4. Appends the secret key to the query string.
-    /// 5. Computes the MD5 hash of the string.
-    /// 6. Converts the hash to an uppercase hexadecimal string and returns it.
-    ///
-    /// # Arguments
-    ///
-    /// * `params` - A mutable `HashMap<String, Value>` containing the parameters to sign.
-    ///
-    /// # Returns
-    ///
-    /// Returns the generated signature as a `Result<String, Box<dyn Error>>`.
-    fn generate_sign(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
-        // Ensure `params` is not empty
-        if params.is_empty() {
-            return Err("Params is empty".into());
+    fn current_timestamp() -> i64 {
+        #[cfg(feature = "wasm")]
+        {
+            (js_sys::Date::now() / 1000.0) as i64
         }
 
-        // Remove the "sign" field if it exists
-        params.remove("sign");
-
-        // Collect and sort the keys of the HashMap
-        let mut keys: Vec<String> = params.keys().cloned().collect();
-        keys.sort();
-
-        // Build the query string by iterating over sorted keys and values
-        let payload: String = keys
-            .iter()
-            .filter_map(|key| {
-                // Convert each value to a string, skipping keys with non-string values
-                match params.get(key) {
-                    Some(value) => value.as_str().map(|v| format!("{}={}", key, v)),
-                    None => None,
-                }
-            })
-            .collect::<Vec<String>>()
-            .join("&");
-
-        // Append the secret key to the query string
-        let payload_with_key = format!("{}&key={}", payload, self.key);
-
-        // Compute the MD5 hash of the final payload
-        let digest = md5::compute(payload_with_key);
-
-        // Convert the hash to uppercase hexadecimal and return the result
-        Ok(format!("{:x}", digest).to_ascii_uppercase())
+        #[cfg(not(feature = "wasm"))]
+        {
+            chrono::Utc::now().timestamp()
+        }
     }
 
-    /// Converts a `HashMap<String, Value>` into a Base64-encoded string.
-    ///
-    /// This function:
-    /// 1. Adds the current timestamp if the `timestamp` key does not exist.
-    /// 2. Adds the generated signature to `params` if the `sign` key does not exist.
-    /// 3. Serializes the `params` to a JSON string.
-    /// 4. Base64 encodes the JSON string and returns it.
-    ///
-    /// # Arguments
-    ///
-    /// * `params` - A mutable `HashMap<String, Value>` containing the parameters to encode.
-    ///
-    /// # Returns
-    ///
-    /// Returns the Base64 encoded string as `Result<String, Box<dyn Error>>`.
-    fn to_string(&self, params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
+    fn generate_sign(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error> {
+        self.sign(params)
+    }
+
+    fn sign(&self, mut params: HashMap<String, Value>) -> Result<String, anyhow::Error> {
+        if params.is_empty() {
+            return Err(anyhow!("params is empty"));
+        }
+
+        params.remove("sign");
+
+        let canonical = serde_json_canonicalizer::to_string(&params)?;
+
+        let payload = format!("{}&key={}", canonical, self.0);
+        let digest = md5::compute(payload);
+
+        Ok(format!("{:X}", digest))
+    }
+
+    fn to_string(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error> {
         let body = match self.to_json(params) {
             Ok(json) => json,
             Err(e) => {
@@ -106,98 +75,133 @@ impl Signer for Signatory {
             }
         };
 
-        // Encode the JSON string to Base64
-        let encoded = general_purpose::STANDARD.encode(body);
-
-        Ok(encoded)
+        Ok(general_purpose::STANDARD.encode(body))
     }
 
-    /// Converts a `HashMap<String, Value>` into a JSON string with the following steps:
-    /// 1. Checks if the input `params` is empty, returning an error if it is.
-    /// 2. Inserts the current timestamp as a string if the "timestamp" key is missing.
-    /// 3. Generates a signature and adds it to the `params` if the "sign" key is missing.
-    /// 4. Serializes the `HashMap` to a JSON string.
-    ///
-    /// # Arguments
-    ///
-    /// * `params` - A mutable `HashMap<String, Value>` containing the parameters to encode.
-    ///
-    /// # Returns
-    ///
-    /// Returns the JSON string as `Result<String, Box<dyn Error>>`.
-    fn to_json(&self, mut params: HashMap<String, Value>) -> Result<String, Box<dyn Error>> {
-        // Check if `params` is empty
+    fn to_json(&self, mut params: HashMap<String, Value>) -> Result<String, anyhow::Error> {
         if params.is_empty() {
-            return Err("Params is empty".into());
+            return Err(anyhow!("params is empty"));
         }
 
-        // Insert current timestamp if it doesn't exist
         if !params.contains_key("timestamp") {
-            let now = Utc::now().timestamp().to_string(); // Get current Unix timestamp as string
+            let now = Self::current_timestamp().to_string();
             params.insert("timestamp".to_string(), Value::String(now));
         }
 
-        // Insert signature if it doesn't exist
         if !params.contains_key("sign") {
-            let sign = self.generate_sign(params.clone())?; // Generate signature
+            let sign = self.sign(params.clone())?; // Generate signature
             params.insert("sign".to_string(), Value::String(sign));
         }
 
-        // Serialize `HashMap` to a JSON string
-        let body = serde_json::to_string(&params)
-            .map_err(|e| format!("Failed to serialize params to JSON: {}", e))?;
+        let value = serde_json::to_value(&params)?;
+
+        let body = serde_json_canonicalizer::to_string(&value)
+            .map_err(|e| anyhow!("Failed to canonicalize JSON: {}", e))?;
 
         Ok(body)
     }
 
-    /// Decodes a Base64-encoded string into a `HashMap<String, Value>`.
-    ///
-    /// This function:
-    /// 1. Base64 decodes the input string.
-    /// 2. Converts the resulting bytes into a UTF-8 string.
-    /// 3. Deserializes the string into a `HashMap`.
-    ///
-    /// # Arguments
-    ///
-    /// * `params` - A Base64-encoded string representing serialized `HashMap<String, Value>`.
-    ///
-    /// # Returns
-    ///
-    /// Returns the decoded `HashMap<String, Value>` as `Result<HashMap<String, Value>, Box<dyn Error>>`.
-    fn decrypt(&self, params: String) -> Result<HashMap<String, Value>, Box<dyn Error>> {
-        // Base64 decode the input string
-        let bytes = general_purpose::STANDARD.decode(&params)?;
+    fn decrypt(&self, params: impl Into<String>) -> Result<HashMap<String, Value>, anyhow::Error> {
+        let bytes = general_purpose::STANDARD.decode(&params.into())?;
 
-        // Convert the decoded bytes into a UTF-8 string
         let body = String::from_utf8(bytes)?;
 
-        // Deserialize the string into a HashMap
-        let result = serde_json::from_str(&body)?;
+        let result = serde_json::from_str::<HashMap<String, Value>>(&body)?;
         Ok(result)
     }
 
-    /// Verifies the integrity of the provided signature.
-    ///
-    /// This function:
-    /// 1. Regenerates the signature based on the `params`.
-    /// 2. Compares the regenerated signature with the provided `sign`.
-    ///
-    /// # Arguments
-    ///
-    /// * `params` - A `HashMap<String, Value>` representing the parameters to verify.
-    /// * `sign` - A `String` representing the signature to verify.
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the signature matches, otherwise `false`.
     fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool {
-        match self.generate_sign(params) {
+        self.verify(params, sign)
+    }
+
+    fn verify(&self, params: HashMap<String, Value>, sign: impl Into<String>) -> bool {
+        match self.sign(params) {
             Err(e) => {
-                println!("Error generating signature: {}", e);
+                println!("Error generating signature: {:#?}", e);
                 return false;
             }
-            Ok(generated_sign) => sign == generated_sign,
+            Ok(generated_sign) => sign.into() == generated_sign,
         }
+    }
+}
+
+#[cfg(feature = "wasm")]
+fn parse_params(params: JsValue) -> Result<HashMap<String, Value>, JsValue> {
+    serde_wasm_bindgen::from_value(params).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+impl Signatory {
+    #[wasm_bindgen(constructor)]
+    pub fn new(secret: String) -> Signatory {
+        Signatory(secret)
+    }
+
+    /// Get current Unix timestamp in seconds.
+    #[wasm_bindgen(js_name = currentTimestamp)]
+    pub fn wasm_current_timestamp() -> i64 {
+        <Self as SignerTrait>::current_timestamp()
+    }
+
+    /// Generate signature.
+    #[wasm_bindgen(js_name = sign)]
+    pub fn wasm_sign(&self, params: JsValue) -> Result<String, JsValue> {
+        let params = parse_params(params)?;
+
+        <Self as SignerTrait>::sign(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Verify signature.
+    #[wasm_bindgen(js_name = verify)]
+    pub fn wasm_verify(&self, params: JsValue, sign: String) -> Result<bool, JsValue> {
+        let params = parse_params(params)?;
+
+        Ok(<Self as SignerTrait>::verify(self, params, sign))
+    }
+
+    /// Convert parameters to canonical JSON.
+    #[wasm_bindgen(js_name = toJson)]
+    pub fn wasm_to_json(&self, params: JsValue) -> Result<String, JsValue> {
+        let params = parse_params(params)?;
+
+        <Self as SignerTrait>::to_json(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Convert parameters to Base64 encoded JSON.
+    #[wasm_bindgen(js_name = toString)]
+    pub fn wasm_to_string(&self, params: JsValue) -> Result<String, JsValue> {
+        let params = parse_params(params)?;
+
+        <Self as SignerTrait>::to_string(self, params)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Decode Base64 JSON.
+    #[wasm_bindgen(js_name = decrypt)]
+    pub fn wasm_decrypt(&self, params: String) -> Result<JsValue, JsValue> {
+        let result = <Self as SignerTrait>::decrypt(self, params)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// @deprecated Use sign() instead.
+    #[deprecated(since = "1.2.0", note = "Use sign() instead.")]
+    #[wasm_bindgen(js_name = generateSign)]
+    pub fn wasm_generate_sign(&self, params: JsValue) -> Result<String, JsValue> {
+        let params = parse_params(params)?;
+
+        <Self as SignerTrait>::sign(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// @deprecated Use verify() instead.
+    #[deprecated(since = "1.2.0", note = "Use verify() instead.")]
+    #[wasm_bindgen(js_name = checkSign)]
+    pub fn wasm_check_sign(&self, params: JsValue, sign: String) -> Result<bool, JsValue> {
+        let params = parse_params(params)?;
+
+        Ok(<Self as SignerTrait>::verify(self, params, sign))
     }
 }
 
@@ -209,11 +213,8 @@ mod tests {
 
     #[test]
     fn test_signature_generation_and_validation() {
-        // Create the signatory instance with a sample key
-        let key = "ds069ed4223ac1660f".to_string();
-        let signatory = Signatory::new(key);
+        let signatory = Signatory::new("ds069ed4223ac1660f");
 
-        // Prepare a sample HashMap
         let mut params = HashMap::new();
         params.insert(
             "client_id".to_string(),
@@ -228,35 +229,28 @@ mod tests {
             Value::String("1727494645".to_string()),
         );
 
-        // Generate signature
-        let sign = signatory.generate_sign(params.clone()).unwrap();
+        let sign = signatory.sign(params.clone()).unwrap();
         println!("Generated sign: {}", sign);
 
-        // Manually provided expected signature (from the decoded JSON)
-        let expected_sign = "4D49FFFDE0DA4537160CFC258356277B";
+        let expected_sign = "F8834B3D1BE660D268DFF7278D16F848";
 
-        // Assert that the generated signature matches the expected one
         assert_eq!(
             sign, expected_sign,
             "The generated signature should match the expected signature"
         );
 
-        // Insert the expected sign back into the params
         params.insert("sign".to_string(), Value::String(sign.clone()));
 
-        // Now encode the parameters as base64
         let base64_str = signatory.to_string(params.clone()).unwrap();
         println!("Base64 encoded: {}", base64_str);
 
-        // Decode back to HashMap
         let decoded_params = signatory.decrypt(base64_str).unwrap();
         assert_eq!(
             params, decoded_params,
             "Decoded params should match the original params"
         );
 
-        // Check if signature is valid
-        let is_valid = signatory.check_sign(decoded_params.clone(), sign.clone());
+        let is_valid = signatory.verify(decoded_params.clone(), sign.clone());
         assert!(is_valid, "Signature should be valid");
     }
 }

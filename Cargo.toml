@@ -1,6 +1,6 @@
 [package]
 name = "async-signatory"
-version = "1.1.4"
+version = "1.2.0"
 description = "Rust Signatory Kit"
 authors = ["cleveng <cleveng@gmail.com>"]
 license = "MIT"
@@ -9,15 +9,26 @@ repository = "https://github.com/cakioe/signatory.git"
 rust-version = "1.85.0"
 keywords = ["signature", "base64", "md5", "timestamp", "serde"]
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-base64 = "0.22.1"
-md5 = "0.8.0"
-chrono = "0.4.40"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+base64 = "0.23.1"
+md5 = "0.8.1"
+chrono = "0.4.45"
+
+serde_json_canonicalizer = "0.4.1"
+
+anyhow = "1.0.104"
+js-sys = "0.3.107"
+serde-wasm-bindgen = { version = "0.6.5", optional = true }
+wasm-bindgen = { version = "0.2.130", optional = true }
 
 [features]
 default = []
+wasm = ["dep:wasm-bindgen"]
 
 [package.metadata.docs.rs]
 all-features = true
