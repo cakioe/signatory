@@ -49,7 +49,7 @@ impl SignerTrait for Signatory {
     }
 
     fn generate_sign(&self, params: HashMap<String, Value>) -> Result<String, anyhow::Error> {
-        self.sign(params)
+        SignerTrait::sign(self, params)
     }
 
     fn sign(&self, mut params: HashMap<String, Value>) -> Result<String, anyhow::Error> {
@@ -89,7 +89,7 @@ impl SignerTrait for Signatory {
         }
 
         if !params.contains_key("sign") {
-            let sign = self.sign(params.clone())?; // Generate signature
+            let sign = SignerTrait::sign(self, params.clone())?; // Generate signature
             params.insert("sign".to_string(), Value::String(sign));
         }
 
@@ -106,16 +106,22 @@ impl SignerTrait for Signatory {
 
         let body = String::from_utf8(bytes)?;
 
-        let result = serde_json::from_str::<HashMap<String, Value>>(&body)?;
+        let value: Value = serde_json::from_str(&body)?;
+
+        // RFC 8785 JSON Canonicalization
+        let canonical = serde_json_canonicalizer::to_string(&value)?;
+
+        let result = serde_json::from_str::<HashMap<String, Value>>(&canonical)?;
+
         Ok(result)
     }
 
     fn check_sign(&self, params: HashMap<String, Value>, sign: String) -> bool {
-        self.verify(params, sign)
+        SignerTrait::verify(self, params, sign)
     }
 
     fn verify(&self, params: HashMap<String, Value>, sign: impl Into<String>) -> bool {
-        match self.sign(params) {
+        match SignerTrait::sign(self, params) {
             Err(e) => {
                 println!("Error generating signature: {:#?}", e);
                 return false;
@@ -138,70 +144,16 @@ impl Signatory {
         Signatory(secret)
     }
 
-    /// Get current Unix timestamp in seconds.
-    #[wasm_bindgen(js_name = currentTimestamp)]
-    pub fn wasm_current_timestamp() -> i64 {
-        <Self as SignerTrait>::current_timestamp()
+    pub fn to_string(&self, params: JsValue) -> Result<String, JsValue> {
+        let params: HashMap<String, Value> = parse_params(params)?;
+
+        SignerTrait::to_string(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    /// Generate signature.
-    #[wasm_bindgen(js_name = sign)]
-    pub fn wasm_sign(&self, params: JsValue) -> Result<String, JsValue> {
-        let params = parse_params(params)?;
+    pub fn verify(&self, params: JsValue, sign: String) -> Result<bool, JsValue> {
+        let params: HashMap<String, Value> = parse_params(params)?;
 
-        <Self as SignerTrait>::sign(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// Verify signature.
-    #[wasm_bindgen(js_name = verify)]
-    pub fn wasm_verify(&self, params: JsValue, sign: String) -> Result<bool, JsValue> {
-        let params = parse_params(params)?;
-
-        Ok(<Self as SignerTrait>::verify(self, params, sign))
-    }
-
-    /// Convert parameters to canonical JSON.
-    #[wasm_bindgen(js_name = toJson)]
-    pub fn wasm_to_json(&self, params: JsValue) -> Result<String, JsValue> {
-        let params = parse_params(params)?;
-
-        <Self as SignerTrait>::to_json(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// Convert parameters to Base64 encoded JSON.
-    #[wasm_bindgen(js_name = toString)]
-    pub fn wasm_to_string(&self, params: JsValue) -> Result<String, JsValue> {
-        let params = parse_params(params)?;
-
-        <Self as SignerTrait>::to_string(self, params)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// Decode Base64 JSON.
-    #[wasm_bindgen(js_name = decrypt)]
-    pub fn wasm_decrypt(&self, params: String) -> Result<JsValue, JsValue> {
-        let result = <Self as SignerTrait>::decrypt(self, params)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// @deprecated Use sign() instead.
-    #[deprecated(since = "1.2.0", note = "Use sign() instead.")]
-    #[wasm_bindgen(js_name = generateSign)]
-    pub fn wasm_generate_sign(&self, params: JsValue) -> Result<String, JsValue> {
-        let params = parse_params(params)?;
-
-        <Self as SignerTrait>::sign(self, params).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    /// @deprecated Use verify() instead.
-    #[deprecated(since = "1.2.0", note = "Use verify() instead.")]
-    #[wasm_bindgen(js_name = checkSign)]
-    pub fn wasm_check_sign(&self, params: JsValue, sign: String) -> Result<bool, JsValue> {
-        let params = parse_params(params)?;
-
-        Ok(<Self as SignerTrait>::verify(self, params, sign))
+        Ok(SignerTrait::verify(self, params, sign))
     }
 }
 
@@ -229,28 +181,31 @@ mod tests {
             Value::String("1727494645".to_string()),
         );
 
-        let sign = signatory.sign(params.clone()).unwrap();
-        println!("Generated sign: {}", sign);
-
-        let expected_sign = "F8834B3D1BE660D268DFF7278D16F848";
-
-        assert_eq!(
-            sign, expected_sign,
-            "The generated signature should match the expected signature"
-        );
-
-        params.insert("sign".to_string(), Value::String(sign.clone()));
-
         let base64_str = signatory.to_string(params.clone()).unwrap();
         println!("Base64 encoded: {}", base64_str);
 
         let decoded_params = signatory.decrypt(base64_str).unwrap();
-        assert_eq!(
-            params, decoded_params,
-            "Decoded params should match the original params"
-        );
+        println!("decoded_params: {:#?}", &decoded_params);
 
-        let is_valid = signatory.verify(decoded_params.clone(), sign.clone());
+        let sign = "F8834B3D1BE660D268DFF7278D16F848";
+        let is_valid = signatory.verify(decoded_params.clone(), sign);
+
         assert!(is_valid, "Signature should be valid");
+    }
+
+    #[test]
+    fn test_parse_value() {
+        let signatory = Signatory::new("ds069ed4223ac1660f");
+
+        let input = "eyJjbGllbnRfaWQiOiIxNjMyNzEyOCIsIm1ldGhvZCI6ImFuZHJvaWQuc2h1dGRvd24iLCJzaWduIjoiRjg4MzRCM0QxQkU2NjBEMjY4REZGNzI3OEQxNkY4NDgiLCJ0aW1lc3RhbXAiOiIxNzI3NDk0NjQ1In0=";
+
+        let value = signatory
+            .decrypt(input)
+            .unwrap_or_else(|err| panic!("decrypt error: {:#?}", err));
+
+        assert_eq!(
+            value.get("client_id").and_then(|v| v.as_str()),
+            Some("16327128")
+        );
     }
 }

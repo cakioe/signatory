@@ -22,13 +22,10 @@ chrono = "0.4.45"
 serde_json_canonicalizer = "0.4.1"
 
 anyhow = "1.0.104"
-js-sys = "0.3.107"
+js-sys = { version = "0.3.107", optional = true }
 serde-wasm-bindgen = { version = "0.6.5", optional = true }
 wasm-bindgen = { version = "0.2.130", optional = true }
 
 [features]
 default = []
-wasm = ["dep:wasm-bindgen"]
-
-[package.metadata.docs.rs]
-all-features = true
+wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:serde-wasm-bindgen"]
